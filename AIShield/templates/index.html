@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AIShield — Hybrid ML Network Intrusion Detection</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="shield-icon">🛡️</span>
+    <div>
+      <h1>AIShield</h1>
+      <p class="subtitle">Hybrid ML-Based Network Intrusion Detection System</p>
+    </div>
+  </div>
+  <div class="status-area">
+    <div class="model-status {{ 'ready' if model_ready else 'not-ready' }}" id="model-status">
+      {% if model_ready %}
+        ● Model loaded
+      {% else %}
+        ● No trained model yet
+      {% endif %}
+    </div>
+    {% if not model_ready %}
+    <button id="train-now-btn" class="btn primary small">⚡ Train Now</button>
+    {% endif %}
+  </div>
+</header>
+<div id="train-banner" class="train-banner hidden"></div>
+
+<main class="container">
+
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="single">🔎 Single Record</button>
+    <button class="tab-btn" data-tab="batch">📄 Batch (CSV Upload)</button>
+    <button class="tab-btn" data-tab="live">🔴 Live Server</button>
+  </nav>
+
+  <!-- ============================= SINGLE RECORD TAB ============================= -->
+  <section id="tab-single" class="tab-panel active">
+    <div class="panel-grid">
+
+      <form id="predict-form" class="card form-card">
+        <div class="card-header">
+          <h2>Traffic Record</h2>
+          <div class="sample-buttons">
+            <span>Load sample:</span>
+            <button type="button" class="chip normal" data-sample="normal">Normal</button>
+            <button type="button" class="chip dos" data-sample="dos">DoS</button>
+            <button type="button" class="chip probe" data-sample="probe">Probe</button>
+            <button type="button" class="chip r2l" data-sample="r2l">R2L</button>
+            <button type="button" class="chip u2r" data-sample="u2r">U2R</button>
+          </div>
+        </div>
+
+        {% for group_name, fields in feature_groups.items() %}
+        <fieldset>
+          <legend>{{ group_name }}</legend>
+          <div class="field-grid">
+            {% for field in fields %}
+            <div class="field">
+              <label for="{{ field }}">{{ field }}</label>
+              {% if field in categorical_options %}
+                <select id="{{ field }}" name="{{ field }}">
+                  {% for opt in categorical_options[field] %}
+                  <option value="{{ opt }}">{{ opt }}</option>
+                  {% endfor %}
+                </select>
+              {% else %}
+                <input type="number" step="any" id="{{ field }}" name="{{ field }}" value="0">
+              {% endif %}
+            </div>
+            {% endfor %}
+          </div>
+        </fieldset>
+        {% endfor %}
+
+        <div class="form-actions">
+          <button type="submit" class="btn primary" {{ 'disabled' if not model_ready }}>🛰️ Analyze Traffic</button>
+          <button type="reset" class="btn secondary">Reset</button>
+        </div>
+      </form>
+
+      <div class="card result-card">
+        <h2>Detection Result</h2>
+        <div id="result-empty" class="result-empty">
+          Submit a traffic record to see AIShield's hybrid verdict here.
+        </div>
+
+        <div id="result-content" class="result-content hidden">
+          <div id="verdict-badge" class="verdict-badge">—</div>
+
+          <div class="score-row">
+            <span>Final fused score</span>
+            <div class="score-bar"><div id="final-score-fill" class="score-fill"></div></div>
+            <span id="final-score-text">0%</span>
+          </div>
+          <div class="score-row">
+            <span>Supervised ensemble</span>
+            <div class="score-bar"><div id="supervised-score-fill" class="score-fill sub"></div></div>
+            <span id="supervised-score-text">0%</span>
+          </div>
+          <div class="score-row">
+            <span>Anomaly score (Isolation Forest)</span>
+            <div class="score-bar"><div id="anomaly-score-fill" class="score-fill sub"></div></div>
+            <span id="anomaly-score-text">0%</span>
+          </div>
+
+          <h3>Model-by-model votes</h3>
+          <table class="votes-table">
+            <thead><tr><th>Model</th><th>Score</th><th>Vote</th></tr></thead>
+            <tbody id="votes-body"></tbody>
+          </table>
+        </div>
+
+        <div id="result-error" class="result-error hidden"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================= BATCH CSV TAB ============================= -->
+  <section id="tab-batch" class="tab-panel">
+    <div class="card">
+      <h2>Batch Prediction (CSV Upload)</h2>
+      <p class="hint">
+        Upload a CSV with the same raw feature columns as training data (a <code>label</code>
+        column, if present, is ignored). Each row will be scored by the full hybrid pipeline.
+      </p>
+      <form id="csv-form">
+        <input type="file" id="csv-file" name="file" accept=".csv" required>
+        <button type="submit" class="btn primary" {{ 'disabled' if not model_ready }}>Upload &amp; Score</button>
+      </form>
+
+      <div id="batch-summary" class="batch-summary hidden"></div>
+      <div class="table-wrap">
+        <table class="votes-table" id="batch-table">
+          <thead><tr><th>#</th><th>Verdict</th><th>Final Score</th><th>Supervised</th><th>Anomaly</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p id="batch-truncated-note" class="hint hidden"></p>
+      <div id="batch-error" class="result-error hidden"></div>
+    </div>
+  </section>
+
+  <!-- ============================= LIVE SERVER TAB ============================= -->
+  <section id="tab-live" class="tab-panel">
+    <div class="card live-card">
+      <div class="live-header">
+        <div>
+          <h2>🔴 Live Server Monitor</h2>
+          <p class="hint">
+            Monitors HTTP requests received by this AIShield Flask server.
+            This is web-server monitoring, not Wi-Fi packet capture.
+          </p>
+        </div>
+        <div class="live-controls">
+          <span id="live-status-badge" class="live-status on">● Monitoring</span>
+          <button id="live-toggle-btn" class="btn secondary">Pause</button>
+          <button id="live-clear-btn" class="btn secondary">Clear</button>
+        </div>
+      </div>
+
+      <div class="live-stats">
+        <div class="live-stat"><span>Total Requests</span><strong id="live-total">0</strong></div>
+        <div class="live-stat normal-stat"><span>Normal</span><strong id="live-normal">0</strong></div>
+        <div class="live-stat suspicious-stat"><span>Suspicious</span><strong id="live-suspicious">0</strong></div>
+      </div>
+
+      <div class="live-note">
+        <strong>Demo:</strong> Keep this tab open and visit the dashboard, click
+        Single Record → Analyze Traffic, or upload a CSV. Those HTTP requests will
+        appear below automatically.
+      </div>
+
+      <div class="table-wrap live-table-wrap">
+        <table class="votes-table" id="live-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Method</th>
+              <th>Endpoint</th>
+              <th>Status</th>
+              <th>Response</th>
+              <th>Risk</th>
+              <th>Verdict</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  AIShield — Random Forest + XGBoost + SVM + Neural Network + Isolation Forest, fused into one verdict.
+</footer>
+
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

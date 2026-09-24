@@ -1,0 +1,17 @@
+entrypoint = "app.py"
+modules = ["python-3.11"]
+run = "bash run.sh"
+
+[nix]
+channel = "stable-23_11"
+
+[[ports]]
+localPort = 8080
+externalPort = 80
+
+[deployment]
+deploymentTarget = "cloudrun"
+run = ["sh", "-c", "gunicorn -w 2 -b 0.0.0.0:$PORT app:app"]
+
+[env]
+PORT = "8080"
